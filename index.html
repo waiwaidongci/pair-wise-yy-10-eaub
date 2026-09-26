@@ -17,6 +17,7 @@
       --violet: #665c93;
     }
     * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
     body { margin: 0; background: var(--bg); color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     header { padding: 22px 28px 16px; border-bottom: 1px solid var(--line); background: #fbfdfb; display: flex; justify-content: space-between; gap: 18px; align-items: end; }
     h1 { margin: 0; font-size: 26px; letter-spacing: 0; }
@@ -42,7 +43,7 @@
     .mini h3 { margin: 0 0 8px; font-size: 14px; }
     .item { border: 1px solid #d7e0dc; border-left: 4px solid var(--teal); background: #fff; border-radius: 7px; padding: 9px; margin-bottom: 8px; cursor: pointer; }
     .item.overdue { border-left-color: var(--red); }
-    .board { display: grid; grid-template-columns: repeat(4, minmax(185px, 1fr)); gap: 12px; overflow-x: auto; }
+    .board { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: 12px; overflow-x: auto; }
     .col { background: #f9fbf9; border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 320px; }
     .col h3 { display: flex; justify-content: space-between; margin: 0 0 10px; font-size: 15px; }
     .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
@@ -51,10 +52,19 @@
     dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
     .dialog-body { padding: 16px; display: grid; gap: 10px; }
     .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .panel-head h2 { margin: 0; font-size: 17px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: start; }
+    .subhead { margin: 0 0 8px; font-size: 14px; }
+    .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--teal); color: #fff; }
+    .badge.gray { background: #5d6764; }
+    .badge.amber { background: var(--amber); }
+    .error { color: var(--red); font-size: 13px; line-height: 1.6; }
+    .hint { font-size: 12px; color: var(--muted); }
     @media (max-width: 980px) {
       header { display: block; padding: 18px; }
       main { padding: 16px; }
-      .top, .lists, .toolbar { grid-template-columns: 1fr; }
+      .top, .lists, .toolbar, .split { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
     }
   </style>
@@ -118,6 +128,23 @@
         <div id="board" class="board"></div>
       </section>
     </section>
+
+    <section class="panel" id="consignPanel">
+      <div class="panel-head">
+        <h2>画廊寄卖与分账</h2>
+        <button id="exportLedgerBtn" class="secondary">导出账本</button>
+      </div>
+      <div class="split">
+        <div>
+          <h3 class="subhead">寄卖单</h3>
+          <div id="noteList"></div>
+        </div>
+        <div>
+          <h3 class="subhead">账本 <span id="ledgerTotals" class="meta"></span></h3>
+          <div id="ledgerList"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <dialog id="detailDialog">
@@ -134,8 +161,60 @@
     </div>
   </dialog>
 
+  <dialog id="consignDialog">
+    <div class="dialog-body">
+      <h2 id="consignTitle">签订寄卖单</h2>
+      <div id="consignBlock" class="error" hidden></div>
+      <form id="consignForm">
+        <label>画廊<input name="gallery" required placeholder="如山房画廊"></label>
+        <div class="grid2">
+          <label>起始日期<input name="start" type="date" required></label>
+          <label>结束日期<input name="end" type="date" required></label>
+        </div>
+        <div class="grid2">
+          <label>售价（元）<input name="price" type="number" min="0.01" step="0.01" required placeholder="8000"></label>
+          <label>佣金比例（%）<input name="commissionRate" type="number" min="0" max="100" step="0.1" value="20" required></label>
+        </div>
+        <div class="hint">同一作品同一时间只能签一张未结束寄卖单；保存仅登记寄卖单，不落账，售出确认后才入账。</div>
+      </form>
+      <div class="actions">
+        <button type="submit" form="consignForm" id="saveConsign">保存寄卖单</button>
+        <button type="button" id="closeConsign" class="secondary">取消</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="saleDialog">
+    <div class="dialog-body">
+      <h2>登记售出</h2>
+      <div id="saleInfo" class="meta"></div>
+      <label>成交额（元）<input id="saleAmount" type="number" min="0.01" step="0.01"></label>
+      <div id="salePreview" class="meta"></div>
+      <div class="actions">
+        <button id="confirmSale">确认售出并入账</button>
+        <button id="cancelSale" class="secondary">取消</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="returnDialog">
+    <div class="dialog-body">
+      <h2>售后退回</h2>
+      <div id="returnInfo" class="meta"></div>
+      <label>损坏情况<textarea id="damageInput" placeholder="退回时发现的断线、翘线、掉粉位置"></textarea></label>
+      <div id="returnError" class="error" hidden>请登记损坏情况，便于返修跟进。</div>
+      <div class="actions">
+        <button id="confirmReturn" class="warn">登记损坏并退回返修</button>
+        <button id="cancelReturn" class="secondary">取消</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="js/consignment.js"></script>
+  <script src="js/ledger.js"></script>
+  <script src="js/consignment-ui.js"></script>
   <script>
-    const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
+    const statuses = ["贴线中", "待阴干", "上金粉", "待交付", "返修", "已售出"];
     const storageKey = "zfl42Works";
     const today = new Date().toISOString().slice(0, 10);
     const seed = [
@@ -220,10 +299,11 @@
           <h3><span>${status}</span><span>${cards.length}</span></h3>
           ${cards.length ? cards.map(w => `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
             <b>${w.theme}</b>
-            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
+            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}${window.consignMark ? consignMark(w.id) : ""}</div>
             <div class="actions" onclick="event.stopPropagation()">
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
               <button class="warn" onclick="recordDefect('${w.id}')">记缺陷</button>
+              ${status === "待交付" ? `<button class="violet" onclick="openConsign('${w.id}')">寄卖</button>` : ""}
             </div>
           </article>`).join("") : `<div class="empty">暂无作品</div>`}
         </section>`;
@@ -233,6 +313,7 @@
     function render() {
       renderSummaries();
       renderBoard();
+      if (window.renderConsignments) renderConsignments();
     }
 
     form.addEventListener("submit", event => {
