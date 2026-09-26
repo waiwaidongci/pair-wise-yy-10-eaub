@@ -42,7 +42,7 @@
     .mini h3 { margin: 0 0 8px; font-size: 14px; }
     .item { border: 1px solid #d7e0dc; border-left: 4px solid var(--teal); background: #fff; border-radius: 7px; padding: 9px; margin-bottom: 8px; cursor: pointer; }
     .item.overdue { border-left-color: var(--red); }
-    .board { display: grid; grid-template-columns: repeat(4, minmax(185px, 1fr)); gap: 12px; overflow-x: auto; }
+    .board { display: grid; grid-template-columns: repeat(5, minmax(185px, 1fr)); gap: 12px; overflow-x: auto; }
     .col { background: #f9fbf9; border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 320px; }
     .col h3 { display: flex; justify-content: space-between; margin: 0 0 10px; font-size: 15px; }
     .actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 8px; }
@@ -51,10 +51,19 @@
     dialog::backdrop { background: rgba(0, 0, 0, 0.3); }
     .dialog-body { padding: 16px; display: grid; gap: 10px; }
     .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .consign { display: grid; grid-template-columns: 320px 1fr 1fr; gap: 18px; align-items: start; }
+    .tag { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--teal); color: #fff; }
+    .tag.expired { background: var(--amber); }
+    .tag.sold { background: var(--violet); }
+    .tag.returned { background: var(--red); }
+    .msg { font-size: 13px; min-height: 17px; }
+    .msg.err { color: var(--red); }
+    .msg.ok { color: var(--teal); }
+    .panel h3 { margin: 12px 0 8px; font-size: 14px; }
     @media (max-width: 980px) {
       header { display: block; padding: 18px; }
       main { padding: 16px; }
-      .top, .lists, .toolbar { grid-template-columns: 1fr; }
+      .top, .lists, .toolbar, .consign { grid-template-columns: 1fr; }
       .grid2 { grid-template-columns: 1fr; }
     }
   </style>
@@ -63,7 +72,7 @@
   <header>
     <div>
       <h1>小型漆线雕工坊管理</h1>
-      <div class="sub">贴线、阴干、上金粉、待交付的作品流转与缺陷追踪</div>
+      <div class="sub">贴线、阴干、上金粉、待交付的作品流转、缺陷追踪与画廊寄卖分账</div>
     </div>
     <button id="exportBtn" class="secondary">导出 JSON</button>
   </header>
@@ -118,6 +127,38 @@
         <div id="board" class="board"></div>
       </section>
     </section>
+
+    <section class="consign">
+      <form id="consignForm" class="panel">
+        <h2>签寄卖单</h2>
+        <label>寄卖作品<select name="workId" required></select></label>
+        <label>画廊<input name="gallery" required placeholder="云栖画廊"></label>
+        <div class="grid2">
+          <label>起始日期<input name="start" type="date" required></label>
+          <label>结束日期<input name="end" type="date" required></label>
+        </div>
+        <div class="grid2">
+          <label>售价（元）<input name="price" type="number" min="1" step="0.01" required placeholder="6800"></label>
+          <label>佣金率（%）<input name="rate" type="number" min="0" max="100" step="0.1" value="15" required></label>
+        </div>
+        <div id="consignMsg" class="msg"></div>
+        <button type="submit" class="violet">签订寄卖单</button>
+      </form>
+
+      <section class="panel">
+        <h2>寄卖单</h2>
+        <div id="orderList"></div>
+      </section>
+
+      <section class="panel">
+        <h2>账本</h2>
+        <div id="ledgerSummary" class="meta"></div>
+        <h3>作者应收</h3>
+        <div id="receivableList"></div>
+        <h3>待冲销</h3>
+        <div id="writeoffList"></div>
+      </section>
+    </section>
   </main>
 
   <dialog id="detailDialog">
@@ -134,16 +175,23 @@
     </div>
   </dialog>
 
+  <script src="consignment.js"></script>
+  <script src="ledger.js"></script>
   <script>
-    const statuses = ["贴线中", "待阴干", "上金粉", "待交付"];
+    const statuses = ["贴线中", "待阴干", "上金粉", "待交付", "返修"];
     const storageKey = "zfl42Works";
+    const consignKey = "zfl42Consignments";
+    const ledgerKey = "zfl42Ledger";
     const today = new Date().toISOString().slice(0, 10);
     const seed = [
       { id: crypto.randomUUID(), base: "木胎香盒", theme: "海水江崖", line: "细线", progress: 70, dryDate: today, gold: "未处理", defect: "", delivery: "2026-06-26", status: "待阴干", note: "边线需保持低浮雕感", logs: ["创建作品"] },
       { id: crypto.randomUUID(), base: "脱胎盘", theme: "折枝梅", line: "混合线", progress: 95, dryDate: "2026-06-20", gold: "试扫粉", defect: "左侧枝干翘线", delivery: "2026-06-23", status: "上金粉", note: "客户要求金粉偏暗", logs: ["创建作品", "记录翘线"] },
-      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: "2026-06-24", gold: "未处理", defect: "", delivery: "2026-06-30", status: "贴线中", note: "", logs: ["创建作品"] }
+      { id: crypto.randomUUID(), base: "竹胎笔筒", theme: "云雷纹", line: "中线", progress: 40, dryDate: "2026-06-24", gold: "未处理", defect: "", delivery: "2026-06-30", status: "贴线中", note: "", logs: ["创建作品"] },
+      { id: crypto.randomUUID(), base: "木胎挂屏", theme: "松鹤延年", line: "粗线", progress: 100, dryDate: today, gold: "已上金粉", defect: "", delivery: new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10), status: "待交付", note: "成品，可供画廊寄卖", logs: ["创建作品"] }
     ];
     let works = JSON.parse(localStorage.getItem(storageKey) || "null") || seed;
+    let consignments = JSON.parse(localStorage.getItem(consignKey) || "[]");
+    let ledgerEntries = JSON.parse(localStorage.getItem(ledgerKey) || "[]");
     let activeId = null;
 
     const form = document.querySelector("#workForm");
@@ -152,6 +200,7 @@
     const themeFilter = document.querySelector("#themeFilter");
     const sortMode = document.querySelector("#sortMode");
     const dialog = document.querySelector("#detailDialog");
+    const consignForm = document.querySelector("#consignForm");
 
     form.dryDate.value = today;
     form.delivery.value = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 10);
@@ -159,6 +208,11 @@
 
     function save() {
       localStorage.setItem(storageKey, JSON.stringify(works));
+    }
+
+    function saveBiz() {
+      localStorage.setItem(consignKey, JSON.stringify(consignments));
+      localStorage.setItem(ledgerKey, JSON.stringify(ledgerEntries));
     }
 
     function filtered() {
@@ -197,6 +251,7 @@
         胎体材质：${w.base}<br>线条粗细：${w.line}<br>贴线进度：${w.progress}%<br>
         阴干日期：${w.dryDate}<br>金粉状态：${w.gold}<br>缺陷位置：${w.defect || "无"}<br>
         交付日期：${w.delivery}<br>当前状态：${w.status}<br>备注：${w.note || "无"}<br>
+        寄卖记录：${consignments.filter(o => o.workId === id).map(o => `${o.gallery}（${o.start} ~ ${o.end}，${Consignment.displayStatus(o, today)}）`).join("；") || "无"}<br>
         流转记录：${w.logs.join(" / ")}
       `;
       document.querySelector("#defectInput").value = "";
@@ -218,21 +273,109 @@
         const cards = list.filter(w => w.status === status);
         return `<section class="col">
           <h3><span>${status}</span><span>${cards.length}</span></h3>
-          ${cards.length ? cards.map(w => `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
+          ${cards.length ? cards.map(w => { const oc = Consignment.openOrderFor(consignments, w.id, today); return `<article class="item ${w.defect ? "overdue" : ""}" onclick="showDetail('${w.id}')">
             <b>${w.theme}</b>
-            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
+            <div class="meta">${w.base} · ${w.line}<br>进度 ${w.progress}% · 阴干 ${w.dryDate}<br>金粉：${w.gold} · 交付：${w.delivery}<br>${oc ? `寄卖：${oc.gallery}（至 ${oc.end}）<br>` : ""}${w.defect ? "缺陷：" + w.defect : "缺陷：无"}</div>
             <div class="actions" onclick="event.stopPropagation()">
               ${statuses.map(s => `<button class="${s === status ? "secondary" : ""}" onclick="updateStatus('${w.id}', '${s}')">${s}</button>`).join("")}
               <button class="warn" onclick="recordDefect('${w.id}')">记缺陷</button>
             </div>
-          </article>`).join("") : `<div class="empty">暂无作品</div>`}
+          </article>`; }).join("") : `<div class="empty">暂无作品</div>`}
         </section>`;
       }).join("");
+    }
+
+    function showConsignMsg(text, ok) {
+      const el = document.querySelector("#consignMsg");
+      el.textContent = text;
+      el.className = `msg ${ok ? "ok" : "err"}`;
+    }
+
+    function setConsignDefaults() {
+      consignForm.start.value = today;
+      consignForm.end.value = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+    }
+
+    function renderConsign() {
+      const select = consignForm.workId;
+      const prev = select.value;
+      const eligible = works.filter(w => w.status === "待交付" && !w.defect);
+      select.innerHTML = eligible.length
+        ? eligible.map(w => {
+            const oc = Consignment.openOrderFor(consignments, w.id, today);
+            return `<option value="${w.id}">${w.theme} · ${w.base}${oc ? `（${oc.gallery} 寄卖中）` : ""}</option>`;
+          }).join("")
+        : `<option value="">暂无待交付且无缺陷的作品</option>`;
+      if (eligible.some(w => w.id === prev)) select.value = prev;
+
+      const tagClass = { "寄卖中": "", "已到期": "expired", "已售出": "sold", "已退回": "returned" };
+      document.querySelector("#orderList").innerHTML = consignments.length ? consignments.map(o => {
+        const w = works.find(item => item.id === o.workId);
+        const st = Consignment.displayStatus(o, today);
+        return `<article class="item ${st === "已退回" ? "overdue" : ""}">
+          <b>${o.gallery}</b> <span class="tag ${tagClass[st]}">${st}</span>
+          <div class="meta">${w ? `${w.theme} · ${w.base}` : "作品已删除"}<br>
+          ${o.start} ~ ${o.end} · 售价 ¥${o.price} · 佣金 ${o.rate}%${o.dealAmount ? `<br>成交 ¥${o.dealAmount} · 作者应收 ¥${Ledger.artistShare(o.dealAmount, o.rate)}` : ""}${o.damage ? `<br>退回损坏：${o.damage}` : ""}</div>
+          <div class="actions">
+            ${o.status === "寄卖中" ? `<button onclick="sellOrder('${o.id}')">售出</button>` : ""}
+            ${o.status === "已售出" ? `<button class="danger" onclick="returnOrder('${o.id}')">售后退回</button>` : ""}
+          </div>
+        </article>`;
+      }).join("") : `<div class="empty">暂无寄卖单</div>`;
+
+      const t = Ledger.totals(ledgerEntries);
+      document.querySelector("#ledgerSummary").innerHTML = `作者应收合计 <b>¥${t.receivable}</b> · 待冲销合计 <b>¥${t.writeOff}</b>`;
+      const renderEntries = kind => {
+        const list = ledgerEntries.filter(e => e.kind === kind);
+        return list.length ? list.map(e => `<div class="item ${kind === "待冲销" ? "overdue" : ""}">
+          <b>¥${e.amount}</b> <span class="meta">${e.theme} · ${e.gallery}</span>
+          <div class="meta">成交 ¥${e.dealAmount} · 佣金 ${e.rate}% · ${e.createdAt} 登记${e.writeOffAt ? ` · ${e.writeOffAt} 转待冲销` : ""}${e.note ? `<br>损坏：${e.note}` : ""}</div>
+        </div>`).join("") : `<div class="empty">暂无</div>`;
+      };
+      document.querySelector("#receivableList").innerHTML = renderEntries("应收");
+      document.querySelector("#writeoffList").innerHTML = renderEntries("待冲销");
+    }
+
+    function sellOrder(id) {
+      const order = consignments.find(o => o.id === id);
+      if (!order || order.status !== "寄卖中") return;
+      const work = works.find(w => w.id === order.workId);
+      const input = prompt(`「${work.theme}」在 ${order.gallery} 的成交额（元）`, order.price);
+      if (input === null) return;
+      const amount = Number(input);
+      if (!(amount > 0)) return alert("成交额需为大于 0 的数字");
+      const entry = Ledger.recordSale(ledgerEntries, order, work, amount);
+      order.status = "已售出";
+      order.dealAmount = amount;
+      order.soldAt = today;
+      work.logs.push(`${new Date().toLocaleString()} 寄卖售出：${order.gallery} 成交 ¥${amount}，作者应收 ¥${entry.amount}`);
+      save();
+      saveBiz();
+      render();
+    }
+
+    function returnOrder(id) {
+      const order = consignments.find(o => o.id === id);
+      if (!order || order.status !== "已售出") return;
+      const work = works.find(w => w.id === order.workId);
+      const damage = (prompt(`登记「${work.theme}」售后退回的损坏情况`) || "").trim();
+      if (!damage) return;
+      order.status = "已退回";
+      order.returnedAt = today;
+      order.damage = damage;
+      work.defect = work.defect ? `${work.defect}; ${damage}` : damage;
+      work.status = "返修";
+      work.logs.push(`${new Date().toLocaleString()} 售后退回：${damage}，作品转返修，应收转待冲销`);
+      Ledger.markWriteOff(ledgerEntries, order.id, damage);
+      save();
+      saveBiz();
+      render();
     }
 
     function render() {
       renderSummaries();
       renderBoard();
+      renderConsign();
     }
 
     form.addEventListener("submit", event => {
@@ -259,6 +402,36 @@
       render();
     });
 
+    consignForm.addEventListener("submit", event => {
+      event.preventDefault();
+      const data = Object.fromEntries(new FormData(consignForm).entries());
+      const input = {
+        workId: data.workId,
+        gallery: data.gallery.trim(),
+        start: data.start,
+        end: data.end,
+        price: Number(data.price),
+        rate: Number(data.rate)
+      };
+      const valid = Consignment.validateOrderInput(input);
+      if (!valid.ok) return showConsignMsg(valid.errors.join("；"), false);
+      const work = works.find(w => w.id === input.workId);
+      const check = Consignment.checkSignable(work, consignments, today);
+      if (!check.ok) {
+        const c = check.conflict;
+        const detail = c ? `：「${work.theme}」正由 ${c.gallery} 寄卖（${c.start} ~ ${c.end}，售价 ¥${c.price}，佣金 ${c.rate}%）` : "";
+        return showConsignMsg(`${check.reason}${detail}，新单未落账`, false);
+      }
+      consignments.unshift({ id: crypto.randomUUID(), ...input, status: "寄卖中", dealAmount: null, soldAt: "", returnedAt: "", damage: "" });
+      work.logs.push(`${new Date().toLocaleString()} 签寄卖单：${input.gallery} ${input.start} ~ ${input.end}，售价 ¥${input.price}，佣金 ${input.rate}%`);
+      save();
+      saveBiz();
+      consignForm.reset();
+      setConsignDefaults();
+      showConsignMsg(`已签订：${input.gallery}（${input.start} ~ ${input.end}）`, true);
+      render();
+    });
+
     document.querySelector("#saveDefect").addEventListener("click", () => {
       recordDefect(activeId, document.querySelector("#defectInput").value.trim());
       showDetail(activeId);
@@ -282,7 +455,11 @@
     window.updateStatus = updateStatus;
     window.recordDefect = recordDefect;
     window.showDetail = showDetail;
+    window.sellOrder = sellOrder;
+    window.returnOrder = returnOrder;
+    setConsignDefaults();
     save();
+    saveBiz();
     render();
   </script>
 </body>
